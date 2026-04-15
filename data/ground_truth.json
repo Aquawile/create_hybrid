@@ -1,0 +1,11 @@
+{
+  "q1": "voltage_sag", "q2": "pitot_ice", "q3": "connector_corrosion",
+  "q4": "vtx_interference", "q5": "misaligned_motor", "q6": "baro_turbulence",
+  "q7": "high_resistance", "q8": "emi_tower", "q9": "vtx_bleed",
+  "q10": "carbon_dust_short", "q11": "structural_resonance", "q12": "hydraulic_leak",
+  "q13": "pyro_resistance", "q14": "antenna_blocking", "q15": "bearing_failure",
+  "q16": "airspeed_mismatch", "q17": "aggressive_pids", "q18": "cell_failure",
+  "q19": "fog_scattering", "q20": "short_circuit", "q21": "high_pids",
+  "q22": "gcs_throttling", "q23": "motor_order_wrong", "q24": "firmware_mismatch",
+  "q25": "bec_failure"
+}
