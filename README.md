@@ -1,152 +1,176 @@
-<<<<<<< HEAD
-# create_hybrid
-=======
-# AD-RAG: Augmented Diagnostic Retrieval-Augmented Generation
+# AD-RAG: Entropy-Gated Diagnostic Retrieval-Augmented Generation
 
-A hybrid RAG system for terminal diagnostic decision-making in autonomous drone systems. This project demonstrates the difference between baseline and hybrid retrieval approaches for diagnosing hardware and software failures in UAV (Unmanned Aerial Vehicle) systems.
+An autonomous UAV diagnostic system that uses **Shannon entropy as an abstention gate** to prevent hallucinated diagnoses. The system compares two retrieval strategies using a **real local LLM** (Ollama), with **no ground truth leakage during inference**.
 
 ## Overview
 
-AD-RAG evaluates diagnostic queries against a knowledge corpus to determine the root cause of hardware failures. The system compares two retrieval strategies:
+AD-RAG evaluates diagnostic queries against a knowledge corpus to determine the root cause of UAV failures. Unlike standard RAG systems that always output an answer, this system **abstains when its internal belief distribution is too uncertain** (high Shannon entropy), preventing confident-but-wrong diagnoses.
 
-- **Baseline**: Uses fixed, generic document retrieval (first 2 documents)
-- **Hybrid**: Uses keyword-based semantic retrieval to find the most relevant documents
+### Key Differences From Standard Approaches
+
+- **Real LLM generation** — Uses Ollama (local, free) instead of manufactured belief functions
+- **No ground truth leakage** — The model diagnoses from retrieved documents alone; accuracy is measured post-hoc
+- **TF-IDF retrieval** — Both baseline and hybrid use proper TF-IDF cosine similarity, not hardcoded document selection
+- **Structured output** — The model must return JSON with diagnosis, confidence, evidence citations, and alternatives considered
+- **Entropy-gated action** — Shannon entropy of the belief distribution determines whether the system ACTs or ABSTAINs
 
 ## Project Structure
 
 ```
 create_hybrid/
-├── main.py                      # Main evaluation script
+├── main.py                      # CLI evaluation script (runs all 25 queries)
+├── dashboard/
+│   └── app.py                   # Streamlit interactive dashboard
 ├── data/
 │   ├── corpus.json             # Knowledge base (25 diagnostic documents)
 │   ├── queries.json             # 25 diagnostic test queries
-│   ├── hypotheses.json          # Candidate hypotheses for each query
-│   └── ground_truth.json        # Correct diagnoses for evaluation
+│   ├── hypotheses.json          # Candidate hypotheses per query
+│   └── ground_truth.json        # Correct diagnoses (eval-only, never passed to model)
 ├── engine/
-│   ├── retriever.py             # Document retrieval (baseline + hybrid)
-│   ├── llm_interface.py         # Belief generation from retrieved docs
-│   └── safety_gate.py           # Entropy-based safety thresholding
+│   ├── retriever.py             # TF-IDF + keyword overlap retrieval
+│   ├── llm_interface.py         # Ollama-based real LLM with structured JSON output
+│   └── safety_gate.py           # Shannon entropy abstention mechanism
 └── evaluation/
     └── metrics.py               # Performance comparison and reporting
 ```
 
 ## Components
 
-### Retriever ([`engine/retriever.py`](engine/retriever.py:3))
+### Retriever ([`engine/retriever.py`](engine/retriever.py))
 
-The [`DiagnosticRetriever`](engine/retriever.py:3) class handles document retrieval:
+The `DiagnosticRetriever` class implements two retrieval modes:
 
-- **Baseline mode** (`hybrid=False`): Returns the first `top_k` documents from the corpus
-- **Hybrid mode** (`hybrid=True`): Performs keyword matching to find documents containing query terms, returning the most relevant matches
+- **Baseline** (`hybrid=False`): Pure TF-IDF cosine similarity ranking. Documents are scored by term frequency-inverse document frequency vectors and ranked by cosine distance to the query.
+- **Hybrid** (`hybrid=True`): TF-IDF score plus a keyword overlap bonus. Documents sharing exact terms with the query receive a small boost, simulating BM25-style lexical matching layered on top of TF-IDF.
 
-### LLM Interface ([`engine/llm_interface.py`](engine/llm_interface.py:3))
+Both modes return the top-k documents by combined score.
 
-The [`DiagnosticLLM`](engine/llm_interface.py:3) class generates belief probabilities:
+### LLM Interface ([`engine/llm_interface.py`](engine/llm_interface.py))
 
-- Initializes beliefs with tiny weights
-- Boosts belief scores when retrieved documents contain ground truth keywords
-- Converts belief weights to probability distributions (0.0 to 1.0)
+The `DiagnosticLLM` class calls a local Ollama instance to generate diagnostic beliefs:
 
-### Safety Gate ([`engine/safety_gate.py`](engine/safety_gate.py:3))
+- **No ground truth is passed** — the model receives only the query, retrieved documents, and candidate hypotheses
+- **Constrained prompt** — the model must respond with structured JSON including diagnosis, confidence, evidence, and alternatives
+- **Structured output parsing** — handles JSON in code fences, bare JSON, or partial output
+- **Abstention handling** — if the model returns no diagnosis, low confidence, or invalid JSON, the system returns a uniform (maximum entropy) distribution
+- **Deterministic** — temperature is set to 0.0 for reproducibility
 
-The [`analyze_safety()`](engine/safety_gate.py:3) function implements an abstention mechanism:
+### Safety Gate ([`engine/safety_gate.py`](engine/safety_gate.py))
 
-- Calculates Shannon entropy from belief distributions
-- If entropy exceeds the threshold, the system **ABSTAINS** from making a decision
-- Otherwise, returns the highest-confidence hypothesis as the decision
-- A higher threshold (2.0) makes the AI more "confident" and willing to act
+The `analyze_safety()` function implements the entropy-based abstention mechanism:
 
-### Metrics ([`evaluation/metrics.py`](evaluation/metrics.py:1))
+- Computes Shannon entropy: `H = -Σ p(x) · log₂ p(x)` over the belief distribution
+- If entropy exceeds the configurable threshold (default: 2.0 bits), the system **ABSTAINs**
+- Otherwise returns the highest-confidence hypothesis for action
 
-The [`print_comparison_row()`](evaluation/metrics.py:1) function displays:
+A lower threshold makes the system more cautious. The default (2.0 bits) allows moderate uncertainty while catching genuinely confused states.
 
-- Query description and ground truth
-- Baseline vs Hybrid predictions with confidence scores
+### Metrics ([`evaluation/metrics.py`](evaluation/metrics.py))
+
+The `print_comparison_row()` function displays side-by-side results:
+
+- Query text and ground truth
+- Baseline vs Hybrid predictions with confidence scores and entropy values
 - Decision status (ACT or ABSTAIN)
-- Outcome summary (whether hybrid saved the mission or prevented wrong action)
+- Outcome assessment (whether hybrid corrected, abstained, or still missed)
 
-## Running the Evaluation
+## Quick Start
 
-Execute the main script:
+### Prerequisites
+
+1. **Python 3.8+** with NumPy
+2. **Ollama** installed and running locally:
+
+```bash
+# macOS
+brew install ollama
+ollama serve &
+ollama pull llama3  # or any other model
+```
+
+3. **Streamlit** (for the dashboard):
+
+```bash
+pip install streamlit numpy requests
+```
+
+### Run CLI Evaluation
 
 ```bash
 python main.py
 ```
 
-The script will:
-1. Load the corpus, queries, hypotheses, and ground truth
-2. Run both baseline and hybrid retrieval for each query
-3. Generate beliefs and apply safety gating
-4. Print a detailed comparison for each diagnostic case
-5. Display final performance summary
+This runs all 25 diagnostic queries through both retrieval methods and prints a detailed comparison with final statistics.
 
-## Configuration
+### Run Interactive Dashboard
 
-Adjust the safety threshold in [`main.py`](main.py:16):
-
-```python
-SAFETY_THRESHOLD = 2.0  # Lower = more cautious (more abstentions)
+```bash
+streamlit run dashboard/app.py
 ```
 
-## Data Format
+The dashboard supports three modes:
+- **Single Query** — run one scenario at a time, see full reasoning and retrieved documents
+- **Batch Run** — execute all 25 queries with a progress bar and results table
+- **Custom Query** — type your own symptom description and candidate diagnoses
 
-### Corpus ([`data/corpus.json`](data/corpus.json:1))
-Each document contains:
-- `id`: Unique identifier (D1-D25)
-- `text`: Diagnostic knowledge text
-- `metadata.domain`: Technical domain (power, sensors, wiring, avionics, etc.)
+### Configuration
 
-### Queries ([`data/queries.json`](data/queries.json:1))
-Diagnostic scenarios describing symptoms (e.g., "Motor RPM dropped instantly during a full throttle climb.")
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SAFETY_THRESHOLD` | `2.0` | Max entropy (bits) before abstention |
+| `OLLAMA_MODEL` | `llama3` | Ollama model name to use |
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama API endpoint |
+| `top_k` | `2` | Number of documents to retrieve |
 
-### Hypotheses ([`data/hypotheses.json`](data/hypotheses.json:1))
-3 candidate diagnoses per query (e.g., ["voltage_sag", "propeller_loose", "esc_thermal"])
-
-### Ground Truth ([`data/ground_truth.json`](data/ground_truth.json:1))
-Correct diagnosis for each query
-
-## Example Output
+## How It Works (Pipeline)
 
 ```
-======================================================================
-ANDURIL AD-RAG: TERMINAL DIAGNOSTIC REPORT
-======================================================================
-
-QUERY: Motor RPM dropped instantly during a full throttle climb.
-TRUTH: voltage_sag
-------------------------------
-SYSTEM    | PREDICTION          | CONFIDENCE | DECISION
-Baseline  | voltage_sag         | 98.7%      | ACT
-Hybrid    | voltage_sag         | 98.7%      | ACT
->>> RESULT: Hybrid saved the mission.
-
-...
-
-======================================================================
-FINAL PERFORMANCE SUMMARY
-======================================================================
-Baseline Correct Actions: 12/25
-Hybrid Correct Actions:   20/25
-Improvement:             32.0%
-======================================================================
+Query
+  ↓
+Retrieve Documents (TF-IDF or TF-IDF + keywords)
+  ↓
+Prompt LLM: "Based on these docs, which diagnosis fits?"
+  ↓
+LLM returns structured JSON: {diagnosis, confidence, evidence, alternatives}
+  ↓
+Build belief distribution from LLM output
+  ↓
+Compute Shannon entropy of belief distribution
+  ↓
+Entropy > threshold? → ABSTAIN (escalate to human)
+Entropy ≤ threshold? → ACT (execute diagnosis)
 ```
+
+## What Makes This Different
+
+| Aspect | Standard RAG | AD-RAG |
+|--------|-------------|--------|
+| Generation | Always outputs an answer | Abstains when uncertain |
+| Retrieval | Often naive | TF-IDF with proper ranking |
+| Ground truth | Sometimes leaked into prompt | Never passed to model at inference |
+| Output format | Free text | Structured JSON with citations |
+| Uncertainty | Hidden or post-hoc | Shannon entropy as explicit gate |
+| Model | Closed API | Local, free (Ollama) |
+
+## Evaluation Metrics
+
+The system reports:
+- **Accuracy**: % of queries where the ACT decision matches ground truth
+- **Abstention rate**: % of queries where the system declined to decide
+- **Wrong rate**: % of queries where the system acted but was incorrect
+- **Improvement**: Accuracy difference between hybrid and baseline
+
+A well-tuned system should show that hybrid retrieval produces higher accuracy and/or more appropriate abstentions than baseline.
 
 ## Technical Domains Covered
 
-- **Power**: Battery issues, ESC thermal shutdown, BEC failures
-- **Sensors**: Pitot tube icing, barometric turbulence, lidar fog interference
-- **Wiring**: Connector corrosion, servo potentiometer failures
-- **Avionics**: Compass variance, PID oscillations, firmware issues
-- **Communications**: VTx interference, telemetry frame loss
-- **Airframe**: Structural resonance, motor misalignment
-- **Propulsion**: Bearing failures, propeller issues
+Power systems, sensor failures, wiring issues, avionics, communications, airframe structure, propulsion, and safety mechanisms across 25 UAV diagnostic scenarios.
 
 ## Dependencies
 
-- Python 3.x
-- NumPy (for numerical operations and entropy calculation)
+- Python 3.8+
+- NumPy
+- Requests (for Ollama API calls)
+- Streamlit (for dashboard)
 
-## License
-
-This project is provided for educational and research purposes.
->>>>>>> 03ede9d (first commit)
+No paid API keys required. Everything runs locally.
