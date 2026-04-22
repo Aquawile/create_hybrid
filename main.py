@@ -22,15 +22,9 @@ OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 retriever = DiagnosticRetriever('data/aviation_corpus.json')
 llm = DiagnosticLLM(model_name=OLLAMA_MODEL, base_url=OLLAMA_URL)
 
-with open('data/aviation_queries.json') as f:
-    queries = json.load(f)
-
-# Use the global hypotheses pool we created in the script
-with open('data/aviation_hypotheses.json') as f:
-    global_hypos = json.load(f)
-
-with open('data/aviation_gt.json') as f:
-    gt = json.load(f)
+# Load unified graph-ready diagnostic dataset
+with open('data/unified_aviation.json') as f:
+    unified_dataset = json.load(f)
 
 # ... inside the loop ...
 for i, qid in enumerate(queries):
@@ -56,19 +50,20 @@ print("=" * 70)
 print("ANDURIL AD-RAG: ENTROPY-GATED DIAGNOSTIC SYSTEM")
 print("=" * 70)
 print(f"Model: {OLLAMA_MODEL} | Threshold: {SAFETY_THRESHOLD} bits")
-print(f"Queries: {len(queries)} | Corpus: {len(retriever.corpus)} documents")
+print(f"Queries: {len(unified_dataset)} | Corpus: {len(retriever.corpus)} documents")
 print("=" * 70)
 
 base_correct = 0
 base_abstain = 0
 hyb_correct = 0
 hyb_abstain = 0
-total = len(queries)
+total = len(unified_dataset)
 
-for i, qid in enumerate(queries):
-    query_text = queries[qid]
-    hypotheses = hypos[qid]
-    truth = gt[qid]
+for i, record in enumerate(unified_dataset):
+    query_text = record["question"]
+    hypotheses = record["candidate_pool"]
+    truth = record["gold_answer"]
+    qid = record["example_id"]
 
     print(f"\n[{i+1}/{total}] Processing: {qid}")
 
