@@ -1,6 +1,7 @@
 import json
 import math
-from collections import Counter
+import re
+from collections import Counter, defaultdict
 
 
 # Common English stopwords to filter out during keyword matching
@@ -84,6 +85,68 @@ class DiagnosticRetriever:
             return 0.0
         return dot / (norm_a * norm_b)
 
+    def _extract_concept_nodes(self, text):
+        """Extract aviation concept nodes from text for graph traversal"""
+        aviation_terms = {
+            "fuel system", "landing gear", "engine", "hydraulic system", "electrical system",
+            "asrs narrative", "ntsb report", "cockpit", "avionics", "control surfaces",
+            "stall warning", "autopilot", "flight control", "emergency system", "thrust reverser",
+            "navigation system", "radar", "transponder", "oxygen system", "fire suppression",
+            "flaps", "slats", "elevator", "aileron", "rudder", "spoiler",
+            "propulsion", "turbine", "combustion chamber", "fuel pump", "hydraulic pump",
+            "battery", "generator", "alternator", "pitot tube", "static port", "airspeed indicator"
+        }
+        
+        found_nodes = set()
+        lower_text = text.lower()
+        
+        for term in aviation_terms:
+            if re.search(r'\b' + re.escape(term) + r'\b', lower_text):
+                found_nodes.add(term)
+        
+        return sorted(list(found_nodes))
+
+    def retrieve_subgraph(self, query, top_k=3):
+        """
+        Graph-based subgraph retrieval:
+        1. Extract concept nodes from query
+        2. Traverse 1-hop neighborhood from matched concepts
+        3. Retrieve documents connected to matched nodes
+        4. Score by connectivity strength
+        """
+        query_nodes = self._extract_concept_nodes(query)
+        
+        if not query_nodes:
+            # Fall back to standard hybrid retrieval if no concepts matched
+            return self.retrieve(query, hybrid=True, top_k=top_k)
+        
+        # Build document concept index on first use
+        if not hasattr(self, 'concept_index'):
+            self.concept_index = defaultdict(list)
+            for idx, doc in enumerate(self.corpus):
+                doc_nodes = self._extract_concept_nodes(doc['text'])
+                for node in doc_nodes:
+                    self.concept_index[node].append(idx)
+        
+        # Get all documents in query node neighborhood
+        neighborhood_docs = set()
+        for node in query_nodes:
+            if node in self.concept_index:
+                neighborhood_docs.update(self.concept_index[node])
+        
+        # Score documents by number of matching concepts
+        doc_scores = []
+        for doc_idx in neighborhood_docs:
+            doc = self.corpus[doc_idx]
+            doc_nodes = self._extract_concept_nodes(doc['text'])
+            overlap = len(set(query_nodes) & set(doc_nodes))
+            doc_scores.append((overlap, doc_idx))
+        
+        # Sort by highest concept overlap first
+        doc_scores.sort(key=lambda x: (-x[0], x[1]))
+        
+        return [self.corpus[idx] for _, idx in doc_scores[:top_k]]
+
     def retrieve(self, query, hybrid=False, top_k=2):
         """
         Retrieve documents for a query.
@@ -117,3 +180,47 @@ class DiagnosticRetriever:
 
         scores.sort(key=lambda x: (-x[0], x[1]))
         return [self.corpus[i] for score, i in scores[:top_k]]
+
+    def compute_graph_coverage(self, query, hypotheses, gold_answer):
+        """
+        Compute coverage metrics for graph retrieval:
+        - Entity overlap between query, gold answer, and retrieved subgraph
+        - Term overlap scores
+        - Returns dict with coverage stats
+        """
+        query_nodes = self._extract_concept_nodes(query)
+        gold_nodes = self._extract_concept_nodes(gold_answer)
+
+        # Retrieve subgraph
+        subgraph_docs = self.retrieve_subgraph(query, top_k=3)
+        subgraph_text = " ".join([doc['text'] for doc in subgraph_docs]).lower()
+        subgraph_nodes = self._extract_concept_nodes(subgraph_text)
+
+        # Entity coverage
+        query_gold_overlap = len(set(query_nodes) & set(gold_nodes)) / max(1, len(set(query_nodes) | set(gold_nodes)))
+        subgraph_gold_overlap = len(set(subgraph_nodes) & set(gold_nodes)) / max(1, len(set(subgraph_nodes) | set(gold_nodes)))
+
+        # Term overlap with gold answer
+        gold_terms = set(gold_answer.lower().split())
+        subgraph_terms = set(subgraph_text.split())
+        term_overlap = len(gold_terms & subgraph_terms) / max(1, len(gold_terms))
+
+        # Hypothesis discrimination: how many hypotheses have support in subgraph
+        hyp_coverage = {}
+        for hyp in hypotheses:
+            hyp_terms = set(hyp.lower().split())
+            hyp_overlap = len(hyp_terms & subgraph_terms) / max(1, len(hyp_terms))
+            hyp_coverage[hyp] = hyp_overlap
+
+        return {
+            "query_nodes": query_nodes,
+            "gold_nodes": gold_nodes,
+            "subgraph_nodes": subgraph_nodes,
+            "query_gold_entity_overlap": query_gold_overlap,
+            "subgraph_gold_entity_overlap": subgraph_gold_overlap,
+            "term_overlap": term_overlap,
+            "hypothesis_coverage": hyp_coverage,
+            "gold_coverage": hyp_coverage.get(gold_answer, 0),
+            "max_distractor_coverage": max([v for k, v in hyp_coverage.items() if k != gold_answer] or [0]),
+            "coverage_ratio": hyp_coverage.get(gold_answer, 0) / max(0.01, max([v for k, v in hyp_coverage.items() if k != gold_answer] or [0]))
+        }
