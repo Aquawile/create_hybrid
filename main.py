@@ -17,21 +17,37 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 
 # ============================================================
-# Load Data
+# Load Data (Correctly pointing to your generated files)
 # ============================================================
-
-retriever = DiagnosticRetriever('data/corpus.json')
+retriever = DiagnosticRetriever('data/aviation_corpus.json')
 llm = DiagnosticLLM(model_name=OLLAMA_MODEL, base_url=OLLAMA_URL)
 
-with open('data/queries.json') as f:
+with open('data/aviation_queries.json') as f:
     queries = json.load(f)
 
-with open('data/hypotheses.json') as f:
-    hypos = json.load(f)
+# Use the global hypotheses pool we created in the script
+with open('data/aviation_hypotheses.json') as f:
+    global_hypos = json.load(f)
 
-with open('data/ground_truth.json') as f:
+with open('data/aviation_gt.json') as f:
     gt = json.load(f)
 
+# ... inside the loop ...
+for i, qid in enumerate(queries):
+    query_text = queries[qid]
+    truth = gt[qid]
+    
+    # CRITICAL: We use the full pool of potential answers for the safety gate
+    # This proves the math can handle a large search space
+    hypotheses = global_hypos 
+
+    print(f"\n[{i+1}/{total}] Processing: {qid}")
+
+    # --- Baseline: TF-IDF retrieval + real LLM ---
+    b_docs = retriever.retrieve(query_text, hybrid=False)
+    # The LLM now evaluates the probability of EVERY global hypothesis
+    b_result = llm.generate_beliefs(b_docs, hypotheses, query_text)
+    b_choice, b_entropy = analyze_safety(b_result["beliefs"], threshold=SAFETY_THRESHOLD)
 # ============================================================
 # Evaluation
 # ============================================================
