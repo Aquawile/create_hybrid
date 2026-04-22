@@ -21,22 +21,29 @@ OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 # Evaluation Configurations
 # ============================================================
 EVAL_CONFIGS = {
-    "baseline": {
-        "retrieval": "tfidf",
-        "use_entropy_gate": True,
-        "description": "TF-IDF retrieval + LLM + entropy gate"
-    },
-    "graph_grounded": {
-        "retrieval": "subgraph",
-        "use_entropy_gate": True,
-        "description": "Subgraph retrieval + LLM + entropy gate"
-    },
-    "no_gate": {
+    "tfidf": {
         "retrieval": "tfidf",
         "use_entropy_gate": False,
-        "description": "TF-IDF retrieval + LLM (no entropy gate)"
+        "description": "TF-IDF only"
+    },
+    "graph_only": {
+        "retrieval": "subgraph",
+        "use_entropy_gate": False,
+        "description": "Graph retrieval only"
+    },
+    "graph_llm": {
+        "retrieval": "subgraph",
+        "use_entropy_gate": True,
+        "description": "Graph retrieval + LLM"
+    },
+    "graph_llm_gated": {
+        "retrieval": "subgraph",
+        "use_entropy_gate": True,
+        "description": "Graph retrieval + LLM + entropy gate"
     }
 }
+
+
 
 def analyze_errors(results, config_name, unified_dataset, retriever, llm, threshold=2.0):
     """

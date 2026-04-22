@@ -106,6 +106,79 @@ class DiagnosticRetriever:
         
         return sorted(list(found_nodes))
 
+
+    def _normalize_concept(self, concept):
+        """Normalize concept names for better matching"""
+        # Remove article prefixes
+        concept = re.sub(r'^(the|a|an)\s+', '', concept.lower().strip())
+        # Standardize terms
+        replacements = {
+            'system': '_sys',
+            'failure': '_fail',
+            'malfunction': '_fail', 
+            'problem': '_issue',
+            'issue': '_issue',
+            'error': '_err',
+            'fault': '_err'
+        }
+        for old, new in replacements.items():
+            concept = re.sub(r'\b' + old + r'\b', new, concept)
+        return concept
+
+    def _extract_concept_nodes_enhanced(self, text):
+        """Enhanced entity extraction with normalization"""
+        base_entities = self._extract_concept_nodes(text)
+        normalized = [self._normalize_concept(e) for e in base_entities]
+        return sorted(set(normalized + base_entities))
+
+    def _compute_path_score(self, query_nodes, doc_nodes):
+        """Score document by weighted path length to query concepts"""
+        if not query_nodes or not doc_nodes:
+            return 0.0
+        
+        # Direct overlap score
+        direct_overlap = len(set(query_nodes) & set(doc_nodes))
+        
+        # Path score: penalize by distance (simplified as inverse overlap)
+        if direct_overlap > 0:
+            path_score = direct_overlap / (1 + (len(query_nodes) - direct_overlap))
+        else:
+            path_score = 0.0
+        
+        return direct_overlap * 0.7 + path_score * 0.3
+
+    def retrieve_subgraph_enhanced(self, query, top_k=3):
+        """Enhanced subgraph retrieval with normalization and path scoring"""
+        query_nodes = self._extract_concept_nodes_enhanced(query)
+        
+        if not query_nodes:
+            return self.retrieve(query, hybrid=True, top_k=top_k)
+        
+        # Build document concept index
+        if not hasattr(self, 'concept_index_enhanced'):
+            self.concept_index_enhanced = defaultdict(list)
+            for idx, doc in enumerate(self.corpus):
+                doc_nodes = self._extract_concept_nodes_enhanced(doc['text'])
+                for node in doc_nodes:
+                    self.concept_index_enhanced[node].append(idx)
+        
+        # Find neighborhood
+        neighborhood_docs = set()
+        for node in query_nodes:
+            if node in self.concept_index_enhanced:
+                neighborhood_docs.update(self.concept_index_enhanced[node])
+        
+        # Score by path strength
+        doc_scores = []
+        for doc_idx in neighborhood_docs:
+            doc = self.corpus[doc_idx]
+            doc_nodes = self._extract_concept_nodes_enhanced(doc['text'])
+            path_score = self._compute_path_score(query_nodes, doc_nodes)
+            doc_scores.append((path_score, doc_idx))
+        
+        doc_scores.sort(key=lambda x: (-x[0], x[1]))
+        return [self.corpus[idx] for _, idx in doc_scores[:top_k]]
+
     def retrieve_subgraph(self, query, top_k=3):
         """
         Graph-based subgraph retrieval:

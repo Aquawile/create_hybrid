@@ -1,0 +1,1 @@
+{"beliefs": {"fuel system pressure drop": 0.16666666666666666, "navigation system malfunction": 0.16666666666666666, "sensor failure": 0.16666666666666666, "electrical failure": 0.16666666666666666, "hydraulic failure": 0.16666666666666666, "GPS glitch": 0.16666666666666666}, "entropy": 2.5849625007125, "raw_response": "[evidence-based scoring]", "abstain": false, "parsed": null}
